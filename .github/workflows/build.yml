@@ -1,0 +1,66 @@
+name: LUSIFER APK
+
+on:
+  push:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Disk alanı aç
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost || true
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: android-actions/setup-android@v3
+
+      - name: SDK / NDK / CMake
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+
+      - name: Vosk Türkçe modeli (uyandırma + STT)
+        run: |
+          mkdir -p app/src/main/assets
+          curl -fL --retry 5 -o vosk.zip https://alphacephei.com/vosk/models/vosk-model-small-tr-0.3.zip
+          unzip -q vosk.zip
+          rm -rf app/src/main/assets/vosk-tr
+          mv vosk-model-small-tr-0.3 app/src/main/assets/vosk-tr
+          rm vosk.zip
+          du -sh app/src/main/assets/vosk-tr
+
+      - name: Qwen2.5 modelleri (0.5B ve 1.5B, ikisi de APK'ya gömülür)
+        run: |
+          mkdir -p app/src/main/assets/llm
+          curl -fL --retry 5 -o app/src/main/assets/llm/qwen-0.5b.gguf \
+            https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/main/qwen2.5-0.5b-instruct-q4_k_m.gguf
+          curl -fL --retry 5 -o app/src/main/assets/llm/qwen-1.5b.gguf \
+            https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/main/qwen2.5-1.5b-instruct-q4_k_m.gguf
+          ls -la app/src/main/assets/llm
+          test $(stat -c%s app/src/main/assets/llm/qwen-0.5b.gguf) -gt 300000000
+          test $(stat -c%s app/src/main/assets/llm/qwen-1.5b.gguf) -gt 900000000
+
+      - name: llama.cpp kaynağı (sabit sürüm)
+        run: |
+          rm -rf app/src/main/cpp/llama.cpp
+          git clone --depth 1 --branch b5100 https://github.com/ggml-org/llama.cpp app/src/main/cpp/llama.cpp \
+            || git clone --depth 1 https://github.com/ggml-org/llama.cpp app/src/main/cpp/llama.cpp
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.11.1
+
+      - name: APK derle
+        run: gradle assembleRelease --no-daemon --stacktrace
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LUSIFER-apk
+          path: app/build/outputs/apk/release/app-release.apk
+          compression-level: 0

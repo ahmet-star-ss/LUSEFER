@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <group android:translateY="8">
+        <!-- şapka: kenar + gövde + bant -->
+        <path android:strokeColor="#39FF14" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M30,70 L78,70 M38,70 L40,38 L68,38 L70,70 M39.5,58 L68.5,58" />
+        <!-- boynuzlar -->
+        <path android:strokeColor="#39FF14" android:strokeWidth="2.6" android:strokeLineCap="round" android:strokeLineJoin="round"
+            android:pathData="M40,42 C28,40 22,30 26,18 M68,42 C80,40 86,30 82,18" />
+        <!-- orta nokta -->
+        <path android:fillColor="#39FF14" android:pathData="M54,46 m-2.4,0 a2.4,2.4 0 1,0 4.8,0 a2.4,2.4 0 1,0 -4.8,0" />
+    </group>
+</vector>
