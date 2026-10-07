@@ -5,6 +5,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -20,11 +23,10 @@ jobs:
           distribution: temurin
           java-version: 17
 
+      - uses: android-actions/setup-android@v3
+
       - name: SDK / NDK / CMake
-        run: |
-          export PATH="$PATH:$ANDROID_HOME/cmdline-tools/latest/bin"
-          yes | sdkmanager --licenses > /dev/null || true
-          sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Vosk Türkçe modeli (uyandırma + STT)
         run: |
@@ -60,8 +62,11 @@ jobs:
       - name: APK derle
         run: gradle assembleRelease --no-daemon --stacktrace
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: LUSIFER-apk
-          path: app/build/outputs/apk/release/app-release.apk
-          compression-level: 0
+      - name: Release olarak yayinla (dogrudan indirme linki)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk LUSIFER.apk
+          ls -la LUSIFER.apk
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest LUSIFER.apk --title "LUSIFER" --notes "Son derleme" --target ${{ github.sha }}
