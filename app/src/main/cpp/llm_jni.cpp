@@ -22,7 +22,6 @@ Java_com_sadrazam_lusifer_core_LlmNative_load(JNIEnv* env, jobject, jstring path
 #ifdef HAVE_LLAMA
     llama_backend_init();
     llama_model_params mp = llama_model_default_params();
-    mp.use_mmap = true;
     const char* p = env->GetStringUTFChars(path, nullptr);
     llama_model* m = llama_model_load_from_file(p, mp);
     env->ReleaseStringUTFChars(path, p);
