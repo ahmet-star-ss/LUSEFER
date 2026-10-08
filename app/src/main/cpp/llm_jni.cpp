@@ -56,12 +56,13 @@ Java_com_sadrazam_lusifer_core_LlmNative_generate(JNIEnv* env, jobject, jlong h,
 
         const llama_vocab* vocab = llama_model_get_vocab(H->model);
         int n = -llama_tokenize(vocab, pr.c_str(), (int32_t) pr.size(), nullptr, 0, true, true);
-        if (n > 0 && n < H->nctx - 24) {
+        const int ctxN = std::min(H->nctx, 1024);
+        if (n > 0 && n < ctxN - 24) {
             std::vector<llama_token> toks(n);
             llama_tokenize(vocab, pr.c_str(), (int32_t) pr.size(), toks.data(), (int32_t) toks.size(), true, true);
 
             llama_context_params cp = llama_context_default_params();
-            cp.n_ctx = H->nctx;
+            cp.n_ctx = ctxN;
             cp.n_batch = 512;
             cp.n_ubatch = 512;
             cp.n_threads = H->threads;
@@ -77,7 +78,7 @@ Java_com_sadrazam_lusifer_core_LlmNative_generate(JNIEnv* env, jobject, jlong h,
                     llama_sampler_chain_add(smpl, llama_sampler_init_temp(temp));
                     llama_sampler_chain_add(smpl, llama_sampler_init_dist(LLAMA_DEFAULT_SEED));
                 }
-                int maxNew = std::min((int) maxTokens, H->nctx - n - 8);
+                int maxNew = std::min((int) maxTokens, ctxN - n - 8);
                 bool fail = false;
                 for (int i = 0; i < n; i += 512) {
                     int cnt = std::min(512, n - i);

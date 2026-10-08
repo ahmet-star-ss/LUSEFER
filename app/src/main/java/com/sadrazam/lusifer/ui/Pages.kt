@@ -404,7 +404,6 @@ fun SettingsPage(onBack: () -> Unit) {
     val p = remember { Prefs.get(ctx) }
     var wakeMode by remember { mutableStateOf(p.wakeMode) }
     var sens by remember { mutableStateOf(p.wakeSens.toFloat()) }
-    var auto by remember { mutableStateOf(p.autoStart) }
     var name by remember { mutableStateOf(p.userName) }
     PageFrame("Ayarlar", onBack) {
         SectionTitle("UYANDIRMA")
@@ -412,7 +411,6 @@ fun SettingsPage(onBack: () -> Unit) {
         RadioRow("Gramer (hafif)", "Yalnızca birkaç kelimeye kısıtlı, daha az pil. Model kelimeyi bilmiyorsa duyamaz.", wakeMode == "GRAMMAR") { wakeMode = "GRAMMAR"; p.wakeMode = "GRAMMAR" }
         SliderRow("Uyandırma hassasiyeti", sens, 0f..100f, { "${it.toInt()}" }) { sens = it; p.wakeSens = it.toInt() }
         N("Yüksek = daha kolay uyanır (yanlış tetikleme artabilir).", 11.sp, 0.55f)
-        SwitchRow("Uygulama açılınca dinlemeyi başlat", null, auto) { auto = it; p.autoStart = it }
 
         SectionTitle("HİTAP")
         NeonField(name, { name = it }, "Kullanıcı adı")

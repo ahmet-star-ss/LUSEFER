@@ -8,6 +8,11 @@ import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import com.sadrazam.lusifer.Prefs
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
@@ -129,6 +134,7 @@ class TtsEngine(private val ctx: Context) {
                     @Deprecated("Deprecated in Java")
                     override fun onError(utteranceId: String?) { waits.remove(utteranceId)?.complete(false) }
                     override fun onError(utteranceId: String?, errorCode: Int) { waits.remove(utteranceId)?.complete(false) }
+                    override fun onStop(utteranceId: String?, interrupted: Boolean) { waits.remove(utteranceId)?.complete(false) }
                 })
                 ready = true
             }
@@ -159,26 +165,64 @@ class TtsEngine(private val ctx: Context) {
         return out.flatMap { if (it.length > 300) it.chunked(280) else listOf(it) }
     }
 
+    // Kısa cümleler (uyandırma/onay) bir kez üretilip saklanır: tekrar söylenirken gecikme sıfır.
+    private val cache = object : LinkedHashMap<String, Pair<ShortArray, Int>>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, Pair<ShortArray, Int>>?): Boolean = size > 24
+    }
+
+    private fun fxKey(p: Prefs) = "${p.voiceFx}|${p.fxPitch}|${p.fxRing}|${p.fxReverb}|${p.fxBits}|${p.fxRate}"
+
+    private fun configure(t: TextToSpeech, p: Prefs) {
+        t.setPitch(if (p.voiceFx) 0.8f else 1.0f)
+        val comp = if (p.voiceFx) (1f / p.fxPitch.coerceIn(0.5f, 1f)).coerceIn(1f, 1.6f) else 1f
+        t.setSpeechRate((p.fxRate * comp).coerceIn(0.5f, 2.2f))
+    }
+
+    private suspend fun prepare(t: TextToSpeech, chunk: String, p: Prefs): Pair<ShortArray, Int>? {
+        val key = fxKey(p) + "#" + chunk
+        synchronized(cache) { cache[key] }?.let { return it }
+        val f = File(ctx.cacheDir, "tts_${System.nanoTime()}.wav")
+        val ok = synth(t, chunk, f)
+        val pcm = if (ok) readWav(f) else null
+        f.delete()
+        if (pcm == null) return null
+        val r = withContext(Dispatchers.Default) { Fx.apply(pcm, p) }
+        if (chunk.length <= 90) synchronized(cache) { cache[key] = r }
+        return r
+    }
+
+    /** Sık söylenen kısa cümleleri önceden üretir (arka planda çağrılır). */
+    suspend fun prewarm(phrases: List<String>) {
+        val t = tts ?: return
+        if (!ready) return
+        val p = Prefs.get(ctx)
+        configure(t, p)
+        for (ph in phrases) {
+            val c = clean(ph)
+            if (c.isBlank()) continue
+            try { prepare(t, c, p) } catch (_: Throwable) {}
+        }
+    }
+
     suspend fun speak(text: String) {
         val t = tts ?: return
         if (!ready) return
         val p = Prefs.get(ctx)
         stopReq = false
-        t.setPitch(if (p.voiceFx) 0.8f else 1.0f)
-        val comp = if (p.voiceFx) (1f / p.fxPitch.coerceIn(0.5f, 1f)).coerceIn(1f, 1.6f) else 1f
-        t.setSpeechRate((p.fxRate * comp).coerceIn(0.5f, 2.2f))
-        for (chunk in chunks(clean(text))) {
-            if (stopReq) break
-            val f = File(ctx.cacheDir, "tts_${System.nanoTime()}.wav")
-            val ok = synth(t, chunk, f)
-            val pcm = if (ok) readWav(f) else null
-            f.delete()
-            if (pcm != null) {
-                val (s, sr) = Fx.apply(pcm, p)
-                play(s, sr)
-            } else {
-                fallbackSpeak(t, chunk)
+        configure(t, p)
+        val list = chunks(clean(text))
+        if (list.isEmpty()) return
+        coroutineScope {
+            // Bir parça çalarken sıradaki parça arka planda hazırlanır (parçalar arası boşluk kalmaz).
+            var next: Deferred<Pair<ShortArray, Int>?>? = async { prepare(t, list[0], p) }
+            for (i in list.indices) {
+                if (stopReq) { next?.cancel(); break }
+                val cur = next?.await()
+                next = if (i + 1 < list.size) async { prepare(t, list[i + 1], p) } else null
+                if (stopReq) { next?.cancel(); break }
+                if (cur != null) play(cur.first, cur.second) else fallbackSpeak(t, list[i])
             }
+            next?.cancel()
         }
     }
 

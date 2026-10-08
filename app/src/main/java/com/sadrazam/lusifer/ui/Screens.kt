@@ -77,12 +77,12 @@ fun AppRoot() {
     var askName by remember { mutableStateOf(!prefs.nameSet) }
 
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
-        if (Perms.mic(ctx) && prefs.autoStart) startListening(ctx)
+        if (Perms.mic(ctx)) startListening(ctx)
     }
 
     // Açılışta (izin varsa) dinlemeyi kendiliğinden başlat (K5)
     LaunchedEffect(Unit) {
-        if (prefs.nameSet && prefs.autoStart && Perms.mic(ctx) && !Assistant.serviceOn.value) startListening(ctx)
+        if (prefs.nameSet && Perms.mic(ctx) && !Assistant.serviceOn.value) startListening(ctx)
     }
 
     BackHandler(enabled = screen != Screen.HOME) {
@@ -145,16 +145,21 @@ fun HomeScreen(onMenu: () -> Unit) {
     val permLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) { _ ->
         if (Perms.mic(ctx)) startListening(ctx)
     }
-    val toggle: () -> Unit = {
+    // Açma/kapama düğmesi yok: dinleme hep açık. Servis düşerse ekran açıkken kendiliğinden yeniden başlar.
+    val start: () -> Unit = {
+        if (Perms.mic(ctx)) startListening(ctx) else permLauncher.launch(Perms.runtime)
+    }
+    val tap: () -> Unit = { if (on) Assistant.manualWake() else start() }
+    var retries by remember { mutableStateOf(0) }
+    LaunchedEffect(on) {
         if (on) {
-            ctx.stopService(Intent(ctx, LusiferService::class.java))
-        } else if (Perms.mic(ctx)) {
-            startListening(ctx)
-        } else {
-            permLauncher.launch(Perms.runtime)
+            kotlinx.coroutines.delay(10_000)
+            retries = 0
+        } else if (p.nameSet && Perms.mic(ctx) && retries < 6) {
+            kotlinx.coroutines.delay(2500)
+            if (!Assistant.serviceOn.value) { retries++; startListening(ctx) }
         }
     }
-    val tap: () -> Unit = { if (on) Assistant.manualWake() else toggle() }
 
     Box(Modifier.fillMaxSize()) {
         if (eye) GreenEye(st, Modifier.fillMaxSize(), tap)
@@ -182,7 +187,7 @@ fun HomeScreen(onMenu: () -> Unit) {
                 if (status.isNotBlank()) N(status, 11.sp, 0.7f)
                 N(
                     when {
-                        !on -> "Dinleme kapalı — aşağıdan başlat"
+                        !on -> "Dinleme başlatılıyor… (halkaya dokun)"
                         st == AssistantState.IDLE -> "${p.userName} — \"LUSİFER\" de"
                         st == AssistantState.WAKE -> "Evet efendim"
                         st == AssistantState.LISTENING -> "Dinliyorum..."
@@ -199,7 +204,6 @@ fun HomeScreen(onMenu: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
-                NeonButton(if (on) "DURDUR" else "DİNLE", onClick = toggle)
                 NeonField(text, { text = it }, "Yazılı komut", Modifier.weight(1f))
                 NeonButton("›") {
                     if (text.isNotBlank()) { Assistant.submit(text.trim()); text = "" }

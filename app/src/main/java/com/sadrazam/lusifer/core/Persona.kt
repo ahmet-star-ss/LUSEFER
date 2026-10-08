@@ -4,14 +4,18 @@ import com.sadrazam.lusifer.Prefs
 
 /** Kişilik modları: SADIK / SOGUK (soğukkanlı) / UYARICI. Asistan kullanıcıyı asla reddetmez. */
 object Persona {
-    fun wake(p: Prefs): String {
+    fun wakePhrases(p: Prefs): List<String> {
         val n = p.userName
         return when (p.persona) {
-            "SOGUK" -> listOf("Evet.", "Dinliyorum.").random()
-            "UYARICI" -> listOf("Evet efendim, dinliyorum.", "Buradayım $n.").random()
-            else -> listOf("Evet efendim.", "Emredin $n.", "Dinliyorum efendim.").random()
+            "SOGUK" -> listOf("Evet.", "Dinliyorum.")
+            "UYARICI" -> listOf("Evet efendim, dinliyorum.", "Buradayım $n.")
+            else -> listOf("Evet efendim.", "Emredin $n.", "Dinliyorum efendim.")
         }
     }
+
+    fun wake(p: Prefs): String = wakePhrases(p).random()
+
+    fun wait(p: Prefs) = if (p.persona == "SOGUK") "Bekleyin." else "Bir saniye efendim."
 
     fun misunderstood(p: Prefs) = "${p.userName}, sizi anlayamadım, tekrar edebilir misiniz?"
 

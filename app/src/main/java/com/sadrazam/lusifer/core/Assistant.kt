@@ -80,6 +80,11 @@ object Assistant {
     suspend fun runLoop() {
         if (!ensureInit()) { delay(1500); return }
         val p = Prefs.get(app)
+        // Arka planda: kısa cümleleri önceden üret, LLM'i belleğe al (ilk soruda uzun bekleme olmasın)
+        scope.launch {
+            try { tts.prewarm(Persona.wakePhrases(p) + Persona.wait(p) + Persona.misunderstood(p)) } catch (_: Throwable) {}
+            try { if (p.llmChoice != "OFF") Llm.ensureLoaded(app, p) } catch (_: Throwable) {}
+        }
         while (currentCoroutineContext().isActive) {
             state.value = AssistantState.IDLE
             val woke = vosk.waitWake(p)
@@ -112,8 +117,8 @@ object Assistant {
         state.value = AssistantState.IDLE
         // RAM (S9): bir süre kullanılmazsa LLM boşaltılır
         scope.launch {
-            delay(120_000)
-            if (Llm.isLoaded() && Llm.idleMs() > 110_000) Llm.unload()
+            delay(900_000)
+            if (Llm.isLoaded() && Llm.idleMs() > 890_000) Llm.unload()
         }
     }
 
@@ -137,6 +142,20 @@ object Assistant {
             var action: Action? = IntentParser.parse(input)
             var chatSay: String? = null
             if (action == null) {
+                val quick = Smalltalk.reply(input, p)
+                if (quick != null) {
+                    say(quick)
+                    chatHistory.add(input to quick)
+                    if (chatHistory.size > 6) chatHistory.removeAt(0)
+                    History.add(app, input, quick, "chat")
+                    return@withLock
+                }
+                if (p.llmChoice != "OFF" && LlmNative.loadedOk && !Llm.isLoaded()) {
+                    // Model yüklenirken sessiz kalma: yüklemeyi başlat, kısa bir cümle söyle
+                    scope.launch { try { Llm.ensureLoaded(app, p) } catch (_: Throwable) {} }
+                    say(Persona.wait(p))
+                    state.value = AssistantState.THINKING
+                }
                 val r = Brain.ask(app, p, input, chatHistory)
                 action = r.action
                 chatSay = r.say

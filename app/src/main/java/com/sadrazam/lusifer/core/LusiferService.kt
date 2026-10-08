@@ -68,17 +68,19 @@ class LusiferService : Service() {
         val open = PendingIntent.getActivity(
             this, 0, Intent(this, MainActivity::class.java), PendingIntent.FLAG_IMMUTABLE
         )
-        val stop = PendingIntent.getService(
-            this, 1, Intent(this, LusiferService::class.java).setAction(ACTION_STOP), PendingIntent.FLAG_IMMUTABLE
-        )
         return NotificationCompat.Builder(this, CH)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle("LUSİFER dinliyor")
             .setContentText("\"LUSİFER\" veya \"Hey LUSİFER\" deyin")
             .setContentIntent(open)
-            .addAction(0, "DURDUR", stop)
             .setOngoing(true)
             .build()
+    }
+
+    /** Uygulama son uygulamalardan silinse de dinleme sürer (stopWithTask=false). */
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // bilerek hiçbir şey yapma: servis ve dinleme döngüsü çalışmaya devam eder
+        super.onTaskRemoved(rootIntent)
     }
 
     override fun onDestroy() {

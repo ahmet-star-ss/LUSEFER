@@ -17,6 +17,8 @@ import java.io.File
 /** Uyandırma kelimesi eşleştirme: "LUSİFER" / "Hey LUSİFER" (bulanık, hassasiyet ayarlı). */
 object Wake {
     private const val T = "lusifer"
+    // lusifer / lucifer / lusifir / lusifur / lusiver ... (norm sonrası)
+    private val LOOSE = Regex("l+u+[sc]+i+[fv]+[aeiu]+r")
 
     fun matches(textRaw: String, sens: Int): Boolean {
         val t = Tx.norm(textRaw).trim()
@@ -25,9 +27,14 @@ object Wake {
         val toks = t.split(" ").filter { it.isNotEmpty() }
         val cands = ArrayList<String>(toks)
         for (i in 0 until toks.size - 1) cands.add(toks[i] + toks[i + 1])
+        for (i in 0 until toks.size - 2) cands.add(toks[i] + toks[i + 1] + toks[i + 2])
+        // "lu si fer" gibi bölünmüş tanımalar için tüm cümle birleşik
+        val joined = toks.joinToString("")
+        if (joined.length >= 4) cands.add(joined)
         for (c in cands) {
             if (c.length < 4) continue
             if (c.contains(T)) return true
+            if (LOOSE.containsMatchIn(c)) return true
             if (Tx.sim(c, T) >= th) return true
             if (Tx.sim(Tx.phon(c), Tx.phon(T)) >= th) return true
         }
@@ -115,10 +122,16 @@ class VoskEngine(private val ctx: Context) {
                 override fun onError(exception: Exception?) { ch.trySend(Msg(null, false)) }
                 override fun onTimeout() {}
             })
-            if (!ok) return false
+            if (!ok) {
+                Assistant.status.value = "Mikrofon açılamadı (başka uygulama kullanıyor olabilir). Tekrar deneniyor…"
+                return false
+            }
+            if (Assistant.status.value.startsWith("Mikrofon")) Assistant.status.value = ""
             cur = ch
             ch.receive().wake
         } catch (e: Throwable) {
+            if (e !is kotlinx.coroutines.CancellationException)
+                Assistant.status.value = "Mikrofon hatası: ${e.message}"
             false
         } finally {
             cur = null

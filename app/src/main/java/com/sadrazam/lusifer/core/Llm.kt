@@ -96,7 +96,7 @@ object Llm {
             try {
                 if (handle != 0L) { LlmNative.free(handle); handle = 0L; loaded = "" }
                 if (!prepare(ctx, choice) { }) return@withContext false
-                val threads = (Runtime.getRuntime().availableProcessors() - 2).coerceIn(2, 6)
+                val threads = (Runtime.getRuntime().availableProcessors() / 2).coerceIn(2, 4)
                 handle = LlmNative.load(modelFile(ctx, choice).absolutePath, 2048, threads)
                 loaded = if (handle != 0L) choice else ""
                 lastUsed = System.currentTimeMillis()
@@ -108,7 +108,7 @@ object Llm {
         }
     }
 
-    suspend fun complete(prompt: String, maxTokens: Int = 160, temp: Float = 0.3f): String = lock.withLock {
+    suspend fun complete(prompt: String, maxTokens: Int = 100, temp: Float = 0.3f): String = lock.withLock {
         withContext(Dispatchers.Default) {
             try {
                 if (handle == 0L) "" else {
@@ -135,16 +135,25 @@ object Llm {
 object Brain {
     data class R(val action: Action?, val say: String?)
 
-    private fun system(name: String) = """Sen LUSİFER'sin; kullanıcının telefonunu yöneten sesli asistansın. Kullanıcıya "$name" diye hitap et. Daima Türkçe, kısa ve net konuş (en fazla 2 cümle).
-Kullanıcı telefonda bir iş istiyorsa SADECE şu JSON'u yaz, başka hiçbir şey yazma:
-{"tool":"<arac>","args":{...},"say":"<kısa onay>"}
-Araçlar: open_app{app}, open_url{url}, call{name}, sms{name,text}, uninstall_app{app}, find_file{name}, read_file{name}, list_dir{path}, torch{on:1 veya 0}, volume{dir:up/down/mute}, wifi{on:1 veya 0}, bluetooth{on:1 veya 0}.
-Sadece sohbet ediyorsa JSON yazma, düz Türkçe cevap ver."""
+    private fun system(name: String) = """Sen LUSİFER'sin: telefonu sesle yöneten Türkçe sesli asistan. Seni BY_SADRAZAM yaptı. Kullanıcıya "$name" diye hitap et. Her zaman Türkçe, en fazla 2 kısa cümle konuş. "Size nasıl yardımcı olabilirim" gibi kalıp cümle kurma; soruyu doğrudan cevapla.
+Telefonda bir iş istenirse SADECE şu JSON'u yaz: {"tool":"<arac>","args":{...},"say":"<kısa onay>"}
+Araçlar: open_app{app}, open_url{url}, call{name}, sms{name,text}, uninstall_app{app}, find_file{name}, read_file{name}, list_dir{path}, torch{on:1/0}, volume{dir:up/down/mute}, wifi{on:1/0}, bluetooth{on:1/0}.
+Sohbette JSON yazma, düz cevap ver."""
 
-    fun buildPrompt(name: String, input: String, hist: List<Pair<String, String>>): String {
+    private fun simpleSystem(name: String) =
+        "Sen LUSİFER'sin, Türkçe sesli asistansın. Seni BY_SADRAZAM yaptı. Kullanıcıya \"$name\" diye hitap et. Soruyu doğrudan, tek kısa Türkçe cümleyle cevapla. Selamlama kalıbı kullanma."
+
+    private val generic = Regex("size\\s+nas[ıi]l\\s+yard[ıi]mc[ıi]\\s+olabilirim", RegexOption.IGNORE_CASE)
+
+    private fun isGreeting(input: String): Boolean {
+        val t = Tx.norm(input)
+        return t.contains("merhaba") || t.contains("selam") || t.contains("nasil yardimci")
+    }
+
+    fun buildPrompt(name: String, input: String, hist: List<Pair<String, String>>, simple: Boolean = false): String {
         val sb = StringBuilder()
-        sb.append("<|im_start|>system\n").append(system(name)).append("<|im_end|>\n")
-        for ((u, a) in hist.takeLast(3)) {
+        sb.append("<|im_start|>system\n").append(if (simple) simpleSystem(name) else system(name)).append("<|im_end|>\n")
+        for ((u, a) in hist.takeLast(2)) {
             sb.append("<|im_start|>user\n").append(u.take(200)).append("<|im_end|>\n")
             sb.append("<|im_start|>assistant\n").append(a.take(300)).append("<|im_end|>\n")
         }
@@ -163,7 +172,7 @@ Sadece sohbet ediyorsa JSON yazma, düz Türkçe cevap ver."""
         if (!Llm.ensureLoaded(ctx, p)) {
             return R(null, "Çevrimdışı model hazır değil. Modeller bölümünden hazırlayın.")
         }
-        val out = Llm.complete(buildPrompt(p.userName, input, hist), 160, 0.3f).trim()
+        val out = Llm.complete(buildPrompt(p.userName, input, hist), 110, 0.3f).trim()
         if (out.isBlank()) return R(null, null)
         val js = extractJson(out)
         if (js != null) {
@@ -177,10 +186,18 @@ Sadece sohbet ediyorsa JSON yazma, düz Türkçe cevap ver."""
                     return R(Action(tool, args), o.optString("say"))
                 }
                 val s = o.optString("say")
-                if (s.isNotBlank()) return R(null, s)
+                if (s.isNotBlank()) return R(null, fixGeneric(ctx, p, input, s))
             } catch (_: Exception) { }
         }
-        return R(null, out)
+        return R(null, fixGeneric(ctx, p, input, out))
+    }
+
+    /** Küçük model kalıp "Merhaba! Size nasıl yardımcı olabilirim?" dönerse sade istemle bir kez daha dener. */
+    private suspend fun fixGeneric(ctx: Context, p: Prefs, input: String, text: String): String? {
+        if (!generic.containsMatchIn(text) || isGreeting(input)) return text
+        val again = Llm.complete(buildPrompt(p.userName, input, emptyList(), simple = true), 60, 0.6f).trim()
+        if (again.isBlank() || generic.containsMatchIn(again)) return null
+        return again
     }
 
     suspend fun debug(ctx: Context, p: Prefs, input: String): String {
